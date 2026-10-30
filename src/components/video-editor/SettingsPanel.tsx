@@ -51,6 +51,7 @@ import {
 	GIF_FRAME_RATES,
 	GIF_SIZE_PRESETS,
 } from "@/lib/exporter";
+import type { TouchOverlaySettings } from "@/lib/touch/touchOverlay";
 import { cn } from "@/lib/utils";
 import { resolveImageWallpaperUrl, WALLPAPER_PATHS } from "@/lib/wallpaper";
 import { type AspectRatio, isPortraitAspectRatio } from "@/utils/aspectRatioUtils";
@@ -71,6 +72,7 @@ import {
 } from "./editorDefaults";
 import { BLUR_REGIONS_ENABLED } from "./featureFlags";
 import { KeyboardShortcutsHelp } from "./KeyboardShortcutsHelp";
+import { TouchSettingsSection } from "./TouchSettingsSection";
 import type {
 	AnnotationRegion,
 	AnnotationType,
@@ -348,6 +350,9 @@ interface SettingsPanelProps {
 	onCursorThemeChange?: (theme: string) => void;
 	hasCursorData?: boolean;
 	showCursorSettings?: boolean;
+	hasTouchData?: boolean;
+	touchSettings?: TouchOverlaySettings;
+	onTouchSettingsChange?: (settings: TouchOverlaySettings) => void;
 }
 
 export default SettingsPanel;
@@ -484,6 +489,9 @@ export function SettingsPanel({
 	onCursorThemeChange,
 	hasCursorData = false,
 	showCursorSettings = true,
+	hasTouchData = false,
+	touchSettings,
+	onTouchSettingsChange,
 }: SettingsPanelProps) {
 	const t = useScopedT("settings");
 	const [activePanelMode, setActivePanelMode] = useState<SettingsPanelMode>("background");
@@ -1691,6 +1699,15 @@ export function SettingsPanel({
 												)}
 											</div>
 										)}
+										{activePanelMode === "cursor" &&
+											hasTouchData &&
+											touchSettings &&
+											onTouchSettingsChange && (
+												<TouchSettingsSection
+													settings={touchSettings}
+													onChange={onTouchSettingsChange}
+												/>
+											)}
 									</AccordionContent>
 								</AccordionItem>
 							)}

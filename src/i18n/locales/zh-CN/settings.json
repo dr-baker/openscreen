@@ -209,6 +209,35 @@
 		"clickBounce": "点击弹跳",
 		"clipToBounds": "裁剪到画布"
 	},
+	"touches": {
+		"show": "Show Touches",
+		"style": "Style",
+		"styles": {
+			"fingers": "Fingers at cursor",
+			"trackpad": "Trackpad"
+		},
+		"position": "Position",
+		"corners": {
+			"top-left": "Top left",
+			"top-right": "Top right",
+			"bottom-left": "Bottom left",
+			"bottom-center": "Bottom center",
+			"bottom-right": "Bottom right"
+		},
+		"size": "Size",
+		"pressure": "Pressure Ring",
+		"pulses": "Haptic Pulses",
+		"flicks": "Flick Trails",
+		"labels": "Gesture Labels",
+		"labelKinds": {
+			"click": "Clicks",
+			"scroll": "Scroll",
+			"swipe": "Swipes",
+			"pinch": "Pinch",
+			"rotate": "Rotate",
+			"flick": "Flicks"
+		}
+	},
 	"language": {
 		"title": "语言"
 	},

@@ -3,6 +3,7 @@ import {
 	BlurFilter,
 	Container,
 	Graphics,
+	Point,
 	Sprite,
 	Texture,
 	VideoSource,
@@ -39,6 +40,11 @@ import {
 	resolveInterpolatedNativeCursorFrame,
 	resolveNativeCursorRenderAsset,
 } from "@/lib/cursor/nativeCursor";
+import {
+	drawTouchOverlay,
+	getTouchTimeline,
+	type TouchOverlaySettings,
+} from "@/lib/touch/touchOverlay";
 import { classifyWallpaper, DEFAULT_WALLPAPER, resolveImageWallpaperUrl } from "@/lib/wallpaper";
 import { getCssClipPath } from "@/lib/webcamMaskShapes";
 import type { CursorRecordingData } from "@/native/contracts";
@@ -145,6 +151,7 @@ interface VideoPlaybackProps {
 	cursorClickBounce?: number;
 	cursorClipToBounds?: boolean;
 	cursorTheme?: string;
+	touchSettings?: TouchOverlaySettings;
 	// Render the selected zoom at the playhead even while paused, so the editor can
 	// preview the effect without leaving the focus-edit view.
 	isPreviewingZoom?: boolean;
@@ -272,6 +279,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 			cursorClickBounce = DEFAULT_CURSOR_SETTINGS.clickBounce,
 			cursorClipToBounds = DEFAULT_CURSOR_SETTINGS.clipToBounds,
 			cursorTheme = DEFAULT_CURSOR_SETTINGS.theme,
+			touchSettings,
 			isPreviewingZoom = false,
 		},
 		ref,
@@ -371,6 +379,8 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 		const nativeCursorImageIdRef = useRef<string | null>(null);
 		const nativeCursorMotionBlurStateRef = useRef(createNativeCursorMotionBlurState());
 		const nativeCursorClipRef = useRef<HTMLDivElement | null>(null);
+		const touchCanvasRef = useRef<HTMLCanvasElement | null>(null);
+		const touchSettingsRef = useRef(touchSettings);
 		const borderRadiusRef = useRef<number>(0);
 
 		const hasNativeCursorRecording = useMemo(
@@ -822,6 +832,10 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 		useEffect(() => {
 			cropRegionRef.current = cropRegion;
 		}, [cropRegion]);
+
+		useEffect(() => {
+			touchSettingsRef.current = touchSettings;
+		}, [touchSettings]);
 
 		useEffect(() => {
 			cursorSizeRef.current = cursorSize;
@@ -1689,6 +1703,51 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 					hideNativeCursorPreview();
 				}
 
+				const touchCanvas = touchCanvasRef.current;
+				if (touchCanvas) {
+					const touchCtx = touchCanvas.getContext("2d");
+					const timeline = getTouchTimeline(cursorRecordingDataRef.current);
+					const settings = touchSettingsRef.current;
+					const cssWidth = touchCanvas.clientWidth;
+					const cssHeight = touchCanvas.clientHeight;
+					const dpr = window.devicePixelRatio || 1;
+					if (
+						touchCanvas.width !== Math.round(cssWidth * dpr) ||
+						touchCanvas.height !== Math.round(cssHeight * dpr)
+					) {
+						touchCanvas.width = Math.round(cssWidth * dpr);
+						touchCanvas.height = Math.round(cssHeight * dpr);
+					}
+					if (touchCtx) {
+						touchCtx.setTransform(1, 0, 0, 1, 0, 0);
+						touchCtx.clearRect(0, 0, touchCanvas.width, touchCanvas.height);
+						const cameraContainer = cameraContainerRef.current;
+						const videoContainer = videoContainerRef.current;
+						if (timeline && settings?.show && cameraContainer && videoContainer) {
+							const mask = baseMaskRef.current;
+							const crop = cropRegionRef.current ?? { x: 0, y: 0, width: 1, height: 1 };
+							const cropWidth = crop.width > 0 ? crop.width : 1;
+							const cropHeight = crop.height > 0 ? crop.height : 1;
+							const toStage = (cx: number, cy: number) =>
+								cameraContainer.toGlobal(
+									new Point(
+										mask.x + ((cx - crop.x) / cropWidth) * mask.width + videoContainer.x,
+										mask.y + ((cy - crop.y) / cropHeight) * mask.height + videoContainer.y,
+									),
+								);
+							const origin = toStage(0, 0);
+							const unit = toStage(1, 1);
+							touchCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+							drawTouchOverlay(touchCtx, timeline, currentTimeRef.current, settings, {
+								width: cssWidth,
+								height: cssHeight,
+								origin: { x: origin.x, y: origin.y },
+								scale: { x: unit.x - origin.x, y: unit.y - origin.y },
+							});
+						}
+					}
+				}
+
 				const composite3D = composite3DRef.current;
 				const outerWrapper = outerWrapperRef.current;
 				if (composite3D && outerWrapper) {
@@ -1705,6 +1764,9 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 						}
 						if (nativeCursorClipRef.current) {
 							nativeCursorClipRef.current.style.transform = "";
+						}
+						if (touchCanvasRef.current) {
+							touchCanvasRef.current.style.transform = "";
 						}
 						if (lastPerspectiveValue !== 0) {
 							outerWrapper.style.perspective = "";
@@ -1724,6 +1786,9 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 						composite3D.style.willChange = "transform";
 						if (nativeCursorClipRef.current) {
 							nativeCursorClipRef.current.style.transform = composite3D.style.transform;
+						}
+						if (touchCanvasRef.current) {
+							touchCanvasRef.current.style.transform = composite3D.style.transform;
 						}
 						lastTransformIsIdentity = false;
 						if (persp !== lastPerspectiveValue) {
@@ -2127,6 +2192,13 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(
 						}}
 					/>
 				</div>
+				{/* Trackpad touch overlay, drawn with the same renderer as the exporter. */}
+				<canvas
+					ref={touchCanvasRef}
+					aria-hidden="true"
+					className="absolute inset-0 h-full w-full"
+					style={{ zIndex: 19, pointerEvents: "none" }}
+				/>
 				<video
 					ref={videoRef}
 					src={videoPath}

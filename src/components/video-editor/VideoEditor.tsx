@@ -53,6 +53,11 @@ import { computeFrameStepTime } from "@/lib/frameStep";
 import type { CursorCaptureMode, ProjectMedia } from "@/lib/recordingSession";
 import { matchesShortcut } from "@/lib/shortcuts";
 import {
+	hasTouchRecordingData,
+	loadTouchOverlaySettings,
+	saveTouchOverlaySettings,
+} from "@/lib/touch/touchOverlay";
+import {
 	getExportFolder,
 	getProjectFolder,
 	loadUserPreferences,
@@ -290,6 +295,7 @@ export default function VideoEditor() {
 		DEFAULT_CURSOR_SETTINGS.clipToBounds,
 	);
 	const [cursorTheme, setCursorTheme] = useState(DEFAULT_CURSOR_SETTINGS.theme);
+	const [touchSettings, setTouchSettings] = useState(loadTouchOverlaySettings);
 	const [nativePlatform, setNativePlatform] = useState<NativePlatform | null>(null);
 	const [recordingCursorCaptureMode, setRecordingCursorCaptureMode] =
 		useState<CursorCaptureMode | null>(null);
@@ -310,6 +316,11 @@ export default function VideoEditor() {
 		hasNativeCursorRecordingData(cursorRecordingData);
 	const effectiveShowCursor = showCursor && hasEditableCursorRecording;
 	const showCursorSettings = hasEditableCursorRecording;
+	const hasTouchData = hasTouchRecordingData(cursorRecordingData);
+
+	useEffect(() => {
+		saveTouchOverlaySettings(touchSettings);
+	}, [touchSettings]);
 	const { locale, setLocale, t: rawT } = useI18n();
 	const t = useScopedT("editor");
 	const ts = useScopedT("settings");
@@ -1908,6 +1919,7 @@ export default function VideoEditor() {
 						cursorClickBounce,
 						cursorClipToBounds,
 						cursorTheme,
+						touchSettings: hasTouchData ? touchSettings : undefined,
 						annotationRegions,
 						webcamLayoutPreset,
 						webcamMaskShape,
@@ -2002,6 +2014,7 @@ export default function VideoEditor() {
 						cursorClickBounce,
 						cursorClipToBounds,
 						cursorTheme,
+						touchSettings: hasTouchData ? touchSettings : undefined,
 						annotationRegions,
 						webcamLayoutPreset,
 						webcamMaskShape,
@@ -2123,6 +2136,8 @@ export default function VideoEditor() {
 			cursorClickBounce,
 			cursorClipToBounds,
 			cursorTheme,
+			touchSettings,
+			hasTouchData,
 			t,
 		],
 	);
@@ -2643,6 +2658,7 @@ export default function VideoEditor() {
 													cursorClickBounce={cursorClickBounce}
 													cursorClipToBounds={cursorClipToBounds}
 													cursorTheme={cursorTheme}
+													touchSettings={touchSettings}
 													isPreviewingZoom={isPreviewingZoom}
 												/>
 											</div>
@@ -2837,6 +2853,9 @@ export default function VideoEditor() {
 											hasNativeCursorRecordingData(cursorRecordingData)
 										}
 										showCursorSettings={showCursorSettings}
+										hasTouchData={hasTouchData}
+										touchSettings={touchSettings}
+										onTouchSettingsChange={setTouchSettings}
 									/>
 								</div>
 							</div>

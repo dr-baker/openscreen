@@ -60,6 +60,11 @@ import {
 	resolveInterpolatedNativeCursorFrame,
 	resolveNativeCursorRenderAsset,
 } from "@/lib/cursor/nativeCursor";
+import {
+	drawTouchOverlay,
+	getTouchTimeline,
+	type TouchOverlaySettings,
+} from "@/lib/touch/touchOverlay";
 import { BackgroundLoadError, classifyWallpaper, resolveImageWallpaperUrl } from "@/lib/wallpaper";
 import { drawCanvasClipPath } from "@/lib/webcamMaskShapes";
 import type { CursorRecordingData } from "@/native/contracts";
@@ -92,6 +97,7 @@ interface FrameRenderConfig {
 	cursorClickBounce?: number;
 	cursorClipToBounds?: boolean;
 	cursorTheme?: string;
+	touchSettings?: TouchOverlaySettings;
 	videoWidth: number;
 	videoHeight: number;
 	webcamSize?: Size | null;
@@ -446,6 +452,7 @@ export class FrameRenderer {
 		this.compositeWithShadows(webcamFrame, !willRotate);
 
 		await this.drawNativeCursor(timeMs);
+		this.drawTouches(timeMs);
 
 		// Annotations go on top of foreground so they rotate with the recording
 		if (
@@ -642,6 +649,30 @@ export class FrameRenderer {
 		);
 		this.foregroundCtx.filter = previousFilter;
 		this.foregroundCtx.restore();
+	}
+
+	private drawTouches(timeMs: number) {
+		const timeline = getTouchTimeline(this.config.cursorRecordingData);
+		const settings = this.config.touchSettings;
+		if (!timeline || !settings?.show || !this.foregroundCtx || !this.layoutCache) {
+			return;
+		}
+		const { maskRect } = this.layoutCache;
+		const crop = this.config.cropRegion;
+		const cropWidth = crop.width > 0 ? crop.width : 1;
+		const cropHeight = crop.height > 0 ? crop.height : 1;
+		const s = this.animationState.appliedScale;
+		const scaleX = (maskRect.width / cropWidth) * s;
+		const scaleY = (maskRect.height / cropHeight) * s;
+		drawTouchOverlay(this.foregroundCtx, timeline, timeMs, settings, {
+			width: this.config.width,
+			height: this.config.height,
+			origin: {
+				x: (maskRect.x - crop.x * (maskRect.width / cropWidth)) * s + this.animationState.x,
+				y: (maskRect.y - crop.y * (maskRect.height / cropHeight)) * s + this.animationState.y,
+			},
+			scale: { x: scaleX, y: scaleY },
+		});
 	}
 
 	private async getCursorImage(asset: { id: string; imageDataUrl: string }) {
