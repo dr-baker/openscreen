@@ -29,6 +29,8 @@ The current helper implementation supports display/window ScreenCaptureKit video
 
 Electron exposes `is-native-mac-capture-available` for capability probing. It resolves the same helper locations listed above and reports `missing-helper` until a Swift helper binary is present. When available, macOS recording routes screen/window capture through the native helper so editable cursor recordings do not bake the system cursor into the video. Cursor positions are sampled in Electron; when the cursor helper is available and Accessibility is granted, samples are also tagged with link/text cursor hints such as `pointer`.
 
+The cursor helper also records trackpad touches through the private `MultitouchSupport` framework, which needs no extra permission. It emits `touch` events (contact positions, contact size, Force Touch pressure in grams, and click stage) on the same clock as cursor samples. Electron stores them as `touches` inside `<video>.cursor.json`, and the editor and exporter render them with `src/lib/touch/touchOverlay.ts`. Pass `"touches": false` in the helper request to disable touch capture.
+
 See `docs/engineering/macos-native-recorder-roadmap.md` for the contract, rollout phases, and SSOT rules.
 
 ## Windows

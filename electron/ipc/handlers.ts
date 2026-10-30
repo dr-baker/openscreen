@@ -34,6 +34,8 @@ import type {
 	NativeCursorAsset,
 	ProjectFileResult,
 	ProjectPathResult,
+	TouchFrame,
+	TouchRecordingData,
 } from "../../src/native/contracts";
 import { mainT } from "../i18n";
 import { RECORDINGS_DIR } from "../main";
@@ -489,6 +491,69 @@ function normalizeCursorAsset(asset: unknown): NativeCursorAsset | null {
 	};
 }
 
+function finiteNumber(value: unknown, fallback = 0) {
+	return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeTouchRecording(value: unknown): TouchRecordingData | undefined {
+	if (!value || typeof value !== "object") {
+		return undefined;
+	}
+	const candidate = value as Partial<TouchRecordingData>;
+	const normPerMM = candidate.normPerMM;
+	if (!Array.isArray(candidate.frames) || !normPerMM) {
+		return undefined;
+	}
+	const frames: TouchFrame[] = candidate.frames
+		.filter((frame): frame is TouchFrame => Boolean(frame) && Array.isArray(frame.contacts))
+		.map((frame) => ({
+			timeMs: Math.max(0, finiteNumber(frame.timeMs)),
+			device: finiteNumber(frame.device),
+			...(frame.stage ? { stage: finiteNumber(frame.stage) } : {}),
+			contacts: frame.contacts.map((contact) => ({
+				id: finiteNumber(contact.id),
+				state: finiteNumber(contact.state),
+				x: finiteNumber(contact.x, 0.5),
+				y: finiteNumber(contact.y, 0.5),
+				size: finiteNumber(contact.size),
+				grams: finiteNumber(contact.grams),
+				angle: finiteNumber(contact.angle),
+				major: finiteNumber(contact.major, 8),
+				minor: finiteNumber(contact.minor, 8),
+			})),
+		}))
+		.sort((a, b) => a.timeMs - b.timeMs);
+	if (frames.length === 0) {
+		return undefined;
+	}
+	return {
+		version: 1,
+		surfaces: (Array.isArray(candidate.surfaces) ? candidate.surfaces : []).map((surface) => ({
+			widthMM: finiteNumber(surface?.widthMM, 160),
+			heightMM: finiteNumber(surface?.heightMM, 100),
+		})),
+		normPerMM: { x: finiteNumber(normPerMM.x), y: finiteNumber(normPerMM.y) },
+		frames,
+	};
+}
+
+function mapTouchFrameTimes(
+	touches: TouchRecordingData | undefined,
+	mapTime: (timeMs: number) => number | null,
+): TouchRecordingData | undefined {
+	if (!touches) {
+		return undefined;
+	}
+	const frames = touches.frames
+		.map((frame) => {
+			const timeMs = mapTime(frame.timeMs);
+			return timeMs === null ? null : { ...frame, timeMs };
+		})
+		.filter((frame): frame is TouchFrame => Boolean(frame))
+		.sort((a, b) => a.timeMs - b.timeMs);
+	return frames.length > 0 ? { ...touches, frames } : undefined;
+}
+
 async function readCursorRecordingFile(targetVideoPath: string): Promise<CursorRecordingData> {
 	const telemetryPath = `${targetVideoPath}.cursor.json`;
 	try {
@@ -518,6 +583,7 @@ async function readCursorRecordingFile(targetVideoPath: string): Promise<CursorR
 			provider: parsed?.provider === "native" ? "native" : "none",
 			samples,
 			assets,
+			touches: normalizeTouchRecording(parsed?.touches),
 		};
 	} catch (error) {
 		const nodeError = error as NodeJS.ErrnoException;
@@ -842,6 +908,9 @@ function shiftPendingCursorTelemetry(offsetMs: number) {
 				timeMs: Math.max(0, sample.timeMs - offsetMs),
 			}))
 			.sort((a, b) => a.timeMs - b.timeMs),
+		touches: mapTouchFrameTimes(pendingCursorRecordingData.touches, (timeMs) =>
+			Math.max(0, timeMs - offsetMs),
+		),
 	};
 }
 
@@ -886,6 +955,18 @@ function compactPendingCursorTelemetryPauseRanges(
 			})
 			.filter((sample): sample is CursorRecordingSample => Boolean(sample))
 			.sort((a, b) => a.timeMs - b.timeMs),
+		touches: mapTouchFrameTimes(pendingCursorRecordingData.touches, (timeMs) => {
+			let pausedBeforeMs = 0;
+			for (const range of normalizedRanges) {
+				if (timeMs >= range.startMs && timeMs <= range.endMs) {
+					return null;
+				}
+				if (timeMs > range.endMs) {
+					pausedBeforeMs += range.endMs - range.startMs;
+				}
+			}
+			return Math.max(0, timeMs - pausedBeforeMs);
+		}),
 	};
 }
 

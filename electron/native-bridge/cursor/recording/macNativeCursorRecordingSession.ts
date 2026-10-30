@@ -8,6 +8,8 @@ import type {
 	CursorRecordingSample,
 	NativeCursorAsset,
 	NativeCursorType,
+	TouchFrame,
+	TouchSurface,
 } from "../../../../src/native/contracts";
 import type { CursorRecordingSession } from "./session";
 
@@ -34,6 +36,16 @@ type MacCursorEvent =
 			timestampMs: number;
 			accessibilityTrusted?: boolean;
 			mouseTapReady?: boolean;
+			touchReady?: boolean;
+			touchSurfaces?: TouchSurface[];
+			displayPointsPerMM?: number;
+	  }
+	| {
+			type: "touch";
+			timestampMs: number;
+			device?: number;
+			stage?: number;
+			contacts?: number[][];
 	  }
 	| {
 			type: "sample";
@@ -48,6 +60,7 @@ type MacCursorEvent =
 
 const HELPER_NAME = "openscreen-macos-cursor-helper";
 const READY_TIMEOUT_MS = 5_000;
+const MAX_TOUCH_FRAMES = 60 * 60 * 60; // 1 hour @ 60Hz
 
 function helperCandidates() {
 	const envPath = process.env.OPENSCREEN_MAC_CURSOR_HELPER_EXE?.trim();
@@ -183,6 +196,9 @@ function normalizeCursorType(value: unknown): NativeCursorType | null {
 
 export class MacNativeCursorRecordingSession implements CursorRecordingSession {
 	private samples: CursorRecordingSample[] = [];
+	private touchFrames: TouchFrame[] = [];
+	private touchSurfaces: TouchSurface[] = [];
+	private touchNormPerMM: { x: number; y: number } | null = null;
 	private assets = new Map<string, NativeCursorAsset>();
 	private process: ChildProcessByStdio<null, Readable, Readable> | null = null;
 	private lineBuffer = "";
@@ -201,6 +217,9 @@ export class MacNativeCursorRecordingSession implements CursorRecordingSession {
 
 	async start(): Promise<void> {
 		this.samples = [];
+		this.touchFrames = [];
+		this.touchSurfaces = [];
+		this.touchNormPerMM = null;
 		this.assets.clear();
 		this.lineBuffer = "";
 		this.startTimeMs = this.options.startTimeMs ?? Date.now();
@@ -282,6 +301,16 @@ export class MacNativeCursorRecordingSession implements CursorRecordingSession {
 			provider: this.assets.size > 0 ? "native" : "none",
 			samples: this.samples,
 			assets: [...this.assets.values()],
+			...(this.touchFrames.length > 0 && this.touchNormPerMM
+				? {
+						touches: {
+							version: 1 as const,
+							surfaces: this.touchSurfaces,
+							normPerMM: this.touchNormPerMM,
+							frames: this.touchFrames,
+						},
+					}
+				: {}),
 		};
 	}
 
@@ -318,7 +347,8 @@ export class MacNativeCursorRecordingSession implements CursorRecordingSession {
 
 		for (const line of lines) {
 			const trimmedLine = line.trim();
-			if (!trimmedLine) {
+			// MultitouchSupport prints its own diagnostics to stdout; only JSON lines are events.
+			if (!trimmedLine.startsWith("{")) {
 				continue;
 			}
 
@@ -332,12 +362,30 @@ export class MacNativeCursorRecordingSession implements CursorRecordingSession {
 
 	private handleEvent(payload: MacCursorEvent) {
 		if (payload.type === "ready") {
+			if (payload.touchReady && payload.touchSurfaces?.length) {
+				this.touchSurfaces = payload.touchSurfaces;
+				const pointsPerMM = payload.displayPointsPerMM ?? 0;
+				const bounds =
+					this.options.getDisplayBounds() ??
+					screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds;
+				if (pointsPerMM > 0 && bounds.width > 0 && bounds.height > 0) {
+					this.touchNormPerMM = {
+						x: pointsPerMM / bounds.width,
+						y: pointsPerMM / bounds.height,
+					};
+				}
+			}
 			if (payload.accessibilityTrusted === false) {
 				console.warn(
 					"[cursor-macos] Accessibility is not trusted; text/pointer affordance detection disabled (bitmap capture still active).",
 				);
 			}
 			this.resolveReady();
+			return;
+		}
+
+		if (payload.type === "touch") {
+			this.captureTouchFrame(payload);
 			return;
 		}
 
@@ -400,6 +448,31 @@ export class MacNativeCursorRecordingSession implements CursorRecordingSession {
 
 		if (this.samples.length > this.options.maxSamples) {
 			this.samples.shift();
+		}
+	}
+
+	private captureTouchFrame(payload: Extract<MacCursorEvent, { type: "touch" }>) {
+		const contacts = (payload.contacts ?? [])
+			.filter((values) => Array.isArray(values) && values.length >= 9)
+			.map(([id, state, x, y, size, grams, angle, major, minor]) => ({
+				id,
+				state,
+				x,
+				y,
+				size,
+				grams,
+				angle,
+				major,
+				minor,
+			}));
+		this.touchFrames.push({
+			timeMs: Math.max(0, payload.timestampMs - this.startTimeMs),
+			device: payload.device ?? 0,
+			...(payload.stage ? { stage: payload.stage } : {}),
+			contacts,
+		});
+		if (this.touchFrames.length > MAX_TOUCH_FRAMES) {
+			this.touchFrames.shift();
 		}
 	}
 

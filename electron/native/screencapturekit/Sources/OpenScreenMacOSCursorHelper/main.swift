@@ -5,6 +5,7 @@ import Foundation
 
 struct CursorHelperRequest: Decodable {
 	let sampleIntervalMs: Int?
+	let touches: Bool?
 }
 
 struct CapturedCursorAsset {
@@ -32,7 +33,8 @@ final class MouseButtonTracker {
 	func start() -> Bool {
 		let mask =
 			(1 << CGEventType.leftMouseDown.rawValue) |
-			(1 << CGEventType.leftMouseUp.rawValue)
+			(1 << CGEventType.leftMouseUp.rawValue) |
+			(1 << pressureEventType)
 		guard let tap = CGEvent.tapCreate(
 			tap: .cgSessionEventTap,
 			place: .headInsertEventTap,
@@ -41,7 +43,7 @@ final class MouseButtonTracker {
 			callback: { _, type, event, userInfo in
 				if let userInfo {
 					let tracker = Unmanaged<MouseButtonTracker>.fromOpaque(userInfo).takeUnretainedValue()
-					tracker.record(type)
+					tracker.record(type, event)
 				}
 				return Unmanaged.passUnretained(event)
 			},
@@ -74,7 +76,11 @@ final class MouseButtonTracker {
 		return events
 	}
 
-	private func record(_ type: CGEventType) {
+	private func record(_ type: CGEventType, _ event: CGEvent) {
+		if type.rawValue == pressureEventType, let nsEvent = NSEvent(cgEvent: event) {
+			TouchTracker.shared.setForceStage(nsEvent.stage)
+			return
+		}
 		lock.lock()
 		defer { lock.unlock() }
 		if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
@@ -95,14 +101,25 @@ final class MouseButtonTracker {
 	}
 }
 
+// NSEvent.EventType.pressure; Force Touch stage changes arrive through the same event tap.
+let pressureEventType: UInt32 = 34
+let emitLock = NSLock()
+
+// Touch frames are emitted from the MultitouchSupport callback thread, so writes are serialized.
 func emit(_ fields: [String: Any?]) {
 	let compacted = fields.compactMapValues { $0 }
 	if let data = try? JSONSerialization.data(withJSONObject: compacted, options: []),
 		let line = String(data: data, encoding: .utf8)
 	{
-		print(line)
-		fflush(stdout)
+		emitLine(line)
 	}
+}
+
+func emitLine(_ line: String) {
+	emitLock.lock()
+	print(line)
+	fflush(stdout)
+	emitLock.unlock()
 }
 
 func stringAttribute(_ element: AXUIElement, _ attribute: String) -> String? {
@@ -300,18 +317,24 @@ if CommandLine.arguments.count >= 2,
 {
 	request = decoded
 } else {
-	request = CursorHelperRequest(sampleIntervalMs: nil)
+	request = CursorHelperRequest(sampleIntervalMs: nil, touches: nil)
 }
 
 let intervalMs = max(8, request.sampleIntervalMs ?? 33)
 let accessibilityTrusted = requestAccessibilityTrust()
 let mouseTracker = MouseButtonTracker()
 let mouseTapReady = mouseTracker.start()
+let touchReady = request.touches == false ? false : TouchTracker.shared.start()
 emit([
 	"type": "ready",
 	"timestampMs": timestampMs(),
 	"accessibilityTrusted": accessibilityTrusted,
 	"mouseTapReady": mouseTapReady,
+	"touchReady": touchReady,
+	"touchSurfaces": touchReady
+		? TouchTracker.shared.surfaces.map { ["widthMM": $0.widthMM, "heightMM": $0.heightMM] }
+		: nil,
+	"displayPointsPerMM": touchReady ? displayPointsPerMM() : nil,
 ])
 
 // Process-wide set so each unique cursor shape is serialised at most once,

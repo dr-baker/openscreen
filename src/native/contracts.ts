@@ -46,11 +46,49 @@ export interface NativeCursorAsset {
 	cursorType?: NativeCursorType | null;
 }
 
+export interface TouchContact {
+	id: number;
+	/** MultitouchSupport contact state: 1-2 hovering, 3-5 touching, 6-7 lifting. */
+	state: number;
+	/** Normalized trackpad position, origin bottom-left. */
+	x: number;
+	y: number;
+	size: number;
+	/** Force reported by Force Touch trackpads, in grams. */
+	grams: number;
+	angle: number;
+	/** Contact ellipse axes in millimetres. */
+	major: number;
+	minor: number;
+}
+
+export interface TouchFrame {
+	timeMs: number;
+	device: number;
+	/** Force Touch click stage at this frame (0 none, 1 click, 2 force click). */
+	stage?: number;
+	contacts: TouchContact[];
+}
+
+export interface TouchSurface {
+	widthMM: number;
+	heightMM: number;
+}
+
+export interface TouchRecordingData {
+	version: 1;
+	surfaces: TouchSurface[];
+	/** Normalized video units per millimetre on the recorded display, for true-scale rendering. */
+	normPerMM: { x: number; y: number };
+	frames: TouchFrame[];
+}
+
 export interface CursorRecordingData {
 	version: number;
 	provider: CursorProviderKind;
 	samples: CursorRecordingSample[];
 	assets: NativeCursorAsset[];
+	touches?: TouchRecordingData;
 }
 
 export interface CursorCapabilities {
